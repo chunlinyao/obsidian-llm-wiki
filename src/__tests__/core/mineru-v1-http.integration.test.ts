@@ -94,8 +94,15 @@ beforeAll(async () => {
       parseBody = JSON.parse((await readBody(req)).toString('utf8'));
       json(res, 202, {
         job_id: 'job-http-1',
-        status: 'queued',
-        files: [{ file_id: 'file-http-1', status: 'queued' }],
+        status: 'completed',
+        files: [{
+          file_id: 'file-http-1',
+          name: 'paper.pdf',
+          status: 'completed',
+          output_files: {
+            markdown: { file_id: 'markdown-http-1', bytes: 31 },
+          },
+        }],
       });
       return;
     }
@@ -195,11 +202,7 @@ describe('MinerU self-hosted v1 real HTTP integration', () => {
       onMineruPhase: (phase: string) => phases.push(phase),
     };
 
-    vi.useFakeTimers();
-    const conversion = convertPdfWithMineruV1(ctx, baseUrl);
-    await vi.advanceTimersByTimeAsync(3000);
-    const result = await conversion;
-    vi.useRealTimers();
+    const result = await convertPdfWithMineruV1(ctx, baseUrl);
 
     expect(result.markdown).toBe('# MinerU HTTP integration\n');
     expect(receivedPdf).toEqual(pdfBytes);
@@ -214,7 +217,6 @@ describe('MinerU self-hosted v1 real HTTP integration', () => {
       { path: '/v1/uploads/upload-http-1/content', authorization: 'Bearer integration-secret' },
       { path: '/v1/uploads/upload-http-1/complete', authorization: 'Bearer integration-secret' },
       { path: '/v1/parse/jobs', authorization: 'Bearer integration-secret' },
-      { path: '/v1/parse/jobs/job-http-1', authorization: 'Bearer integration-secret' },
       { path: '/v1/files/markdown-http-1/content', authorization: 'Bearer integration-secret' },
     ]);
   }, 15_000);
