@@ -71,7 +71,7 @@ export function renderWikiConfigSection(tab: LLMWikiSettingTab, containerEl: HTM
     .setName(tab.getText('baseUrlName'))
     .setDesc(tab.getText('baseUrlDescOverride'))
     .addText(text => text
-      .setPlaceholder('MinerU server URL')
+      .setPlaceholder('Server URL')
       .setValue(tempSettings.mineruApiUrl ?? '')
       .onChange(value => { tempSettings.mineruApiUrl = value.trim(); }));
 
