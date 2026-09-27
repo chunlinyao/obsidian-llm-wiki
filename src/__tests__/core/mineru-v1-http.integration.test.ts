@@ -26,7 +26,7 @@ import { convertPdfWithMineruV1 } from '../../core/mineru-v1-converter';
 
 let baseUrl = '';
 let server: ReturnType<typeof createServer>;
-let receivedPdf = Buffer.alloc(0);
+let receivedPdf = new Uint8Array();
 let parseBody: unknown;
 let authLog: Array<{ path: string; authorization?: string }> = [];
 
@@ -75,7 +75,7 @@ beforeAll(async () => {
     }
 
     if (req.method === 'PUT' && path === '/v1/uploads/upload-http-1/content') {
-      receivedPdf = await readBody(req);
+      receivedPdf = new Uint8Array(await readBody(req));
       res.writeHead(200);
       res.end();
       return;
@@ -145,7 +145,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   cacheStore.clear();
-  receivedPdf = Buffer.alloc(0);
+  receivedPdf = new Uint8Array();
   parseBody = undefined;
   authLog = [];
   requestUrlMock.mockReset();
@@ -158,9 +158,7 @@ beforeEach(() => {
     const response = await fetch(options.url, {
       method: options.method ?? 'GET',
       headers: options.headers,
-      ...(options.body !== undefined
-        ? { body: typeof options.body === 'string' ? options.body : Buffer.from(options.body) }
-        : {}),
+      ...(options.body !== undefined ? { body: options.body } : {}),
     });
     const arrayBuffer = await response.arrayBuffer();
     let parsedJson: unknown = undefined;
@@ -204,7 +202,7 @@ describe('MinerU self-hosted v1 real HTTP integration', () => {
     vi.useRealTimers();
 
     expect(result.markdown).toBe('# MinerU HTTP integration\n');
-    expect(Buffer.from(receivedPdf)).toEqual(Buffer.from(pdfBytes));
+    expect(receivedPdf).toEqual(pdfBytes);
     expect(parseBody).toEqual({
       files: [{ source: { type: 'file_id', file_id: 'file-http-1' } }],
       ocr_mode: 'auto',
