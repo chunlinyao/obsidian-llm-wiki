@@ -46,6 +46,7 @@ import {
 import { PDF_PROMPTS } from '../wiki/prompts/pdf';
 import type { LLMClient } from '../types';
 import { convertPdfWithMineru } from './mineru-converter';
+import { convertPdfWithMineruV1 } from './mineru-v1-converter';
 
 // --- public types ---
 
@@ -59,6 +60,7 @@ export interface PdfConversionContext {
     model: string;
     forcePdfSupport?: boolean;
     markdownConversionBackend?: 'native' | 'mineru';
+    mineruApiUrl?: string;
     [k: string]: unknown;
   };
   /** Resolved at the WikiEngine boundary from Obsidian SecretStorage. */
@@ -122,7 +124,10 @@ export class EncryptedPdfError extends Error {
  */
 export async function convertPdfToMarkdown(ctx: PdfConversionContext): Promise<ConversionResult> {
   if (ctx.settings.markdownConversionBackend === 'mineru') {
-    return convertPdfWithMineru(ctx);
+    const selfHostedUrl = ctx.settings.mineruApiUrl?.trim();
+    return selfHostedUrl
+      ? convertPdfWithMineruV1(ctx, selfHostedUrl)
+      : convertPdfWithMineru(ctx);
   }
   const { app, settings, pdfFile, llmClient, resolveModelForTask, subtle } = ctx;
 

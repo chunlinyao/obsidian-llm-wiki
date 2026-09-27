@@ -784,6 +784,7 @@ export class WikiEngine {
           model: this.settings.model,
           forcePdfSupport: this.settings.forcePdfSupport,
           markdownConversionBackend: this.settings.markdownConversionBackend,
+          mineruApiUrl: this.settings.mineruApiUrl,
         },
         ...(this.settings.markdownConversionBackend === 'mineru'
           ? { mineruApiToken: this.app.secretStorage.getSecret(MINERU_API_TOKEN_SECRET_ID) ?? '' }

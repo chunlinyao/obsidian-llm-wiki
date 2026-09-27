@@ -58,6 +58,10 @@ describe('MinerU settings', () => {
 
     renderWikiConfigSection(tab, {} as HTMLElement);
 
+    const apiUrl = controls.get('baseUrlName');
+    apiUrl?.change?.(' http://192.168.1.50:8000 ');
+    expect(tab.tempSettings.mineruApiUrl).toBe('http://192.168.1.50:8000');
+
     const token = controls.get('mineruApiTokenName');
     expect(getSecret).toHaveBeenCalledWith('karpathywiki-mineru-api-token');
     expect(token?.inputEl.type).toBe('password');
