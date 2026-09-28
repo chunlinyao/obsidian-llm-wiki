@@ -140,7 +140,12 @@ vi.mock('obsidian', () => ({
   },
   // Suggest modals (stubbed — used in settings.ts FolderSuggestModal)
   FuzzySuggestModal: class {
-    constructor() {}
+    app: unknown;
+    // Obsidian's real FuzzySuggestModal stores the app it is constructed with,
+    // and subclasses read `this.app.vault` (FileSuggestModal / FolderSuggestModal).
+    // The stub has to store it too, or a subclass's getItems() throws before
+    // reaching any assertion.
+    constructor(app?: unknown) { this.app = app; }
     open() {}
     close() {}
     onOpen() {}

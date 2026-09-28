@@ -72,7 +72,7 @@ import { ContradictionManager } from './contradictions';
 // v1.25.1 Phase C-PR1: buildLogHeader moved into LogWriter.
 import { UNIVERSAL_LINK_CONSTRAINTS } from './prompts/constraints';
 import { SourceAnalyzer } from './source-analyzer';
-import { TOKENS_PAGE_GENERATION, NOTICE_ABORT, NOTICE_RATE_LIMIT, NOTICE_NORMAL, NOTICE_SHORT, INGESTED_HASHES_TTL_MS, COMPATIBLE_SOURCE_EXTENSIONS, MINERU_API_TOKEN_SECRET_ID, MINERU_CONVERSION_EXTENSIONS, MINERU_MAX_PDF_MB, MINERU_MAX_PDF_PAGES } from '../constants';
+import { TOKENS_PAGE_GENERATION, NOTICE_ABORT, NOTICE_RATE_LIMIT, NOTICE_NORMAL, NOTICE_SHORT, INGESTED_HASHES_TTL_MS, COMPATIBLE_SOURCE_EXTENSIONS, MINERU_API_TOKEN_SECRET_ID, MINERU_CONVERSION_EXTENSIONS, MINERU_MAX_PDF_MB, MINERU_MAX_PDF_PAGES, allowedSourceExtensions } from '../constants';
 import { PageFactory } from './page-factory';
 import { ConversationIngestor, ConversationOrchestration, formatConversation, ConversationHistory } from './conversation-ingest';
 import type { Graph } from '../core/build-graph';
@@ -575,12 +575,21 @@ export class WikiEngine {
    * duplicates (within the batch and already in the wiki). Returns the first
    * failing reason, or null to proceed. On proceed, records the hash in the batch
    * so a later identical file in the same run is caught.
+   *
+   * `allowedExtensions` defaults to the text/PDF set. The conversion re-entry
+   * passes the configured backend's set: its body is already converted markdown,
+   * so the ORIGINAL extension (docx / xlsx / png …) must not decide the outcome.
    */
-  async checkRequirements(file: TFile, content: string, batch?: BatchRequirementsContext): Promise<SourceRejection | null> {
+  async checkRequirements(
+    file: TFile,
+    content: string,
+    batch?: BatchRequirementsContext,
+    allowedExtensions: readonly string[] = COMPATIBLE_SOURCE_EXTENSIONS,
+  ): Promise<SourceRejection | null> {
     const contentRejection = checkContentRequirements({
       extension: file.extension,
       content,
-      allowedExtensions: COMPATIBLE_SOURCE_EXTENSIONS,
+      allowedExtensions,
     });
     if (contentRejection) return contentRejection;
 
@@ -1026,7 +1035,19 @@ export class WikiEngine {
     // PDF branch needs them. A skip here therefore has something to tear down,
     // and the return below sits above the main `try`, so it must do it itself.
     const fileContent = opts?.contentOverride ?? await this.app.vault.read(file);
-    const rejection = opts?.forceReingest ? null : await this.checkRequirements(file, fileContent, opts?.batchCtx);
+    const rejection = opts?.forceReingest ? null : await this.checkRequirements(
+      file,
+      fileContent,
+      opts?.batchCtx,
+      // Office/image support (#Office): `contentOverride` is set only by the
+      // conversion re-entry, so this is the "body came from a converter" case.
+      // The converter is what makes docx/xlsx/png ingestable — without the
+      // widened allowlist the gate rejected the file by its ORIGINAL extension
+      // after MinerU had already converted it, producing zero pages.
+      opts?.contentOverride !== undefined
+        ? allowedSourceExtensions(this.settings.markdownConversionBackend)
+        : COMPATIBLE_SOURCE_EXTENSIONS,
+    );
     if (rejection) {
       const confirmed = rejection.reason === 'duplicate' && opts?.interactive && this.onConfirmReingest
         ? await this.onConfirmReingest(file, rejection)

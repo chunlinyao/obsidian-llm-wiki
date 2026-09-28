@@ -675,6 +675,20 @@ describe('WikiEngine.ingestSource — Altitude #1 multi-format routing (#404 fol
     return file;
   }
 
+  function xlsxFile(path = 'sources/budget.xlsx'): TFile {
+    const name = path.split('/').pop() ?? 'budget.xlsx';
+    const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
+    const file = Object.assign(new TFile(), {
+      path, name, basename: 'budget', extension: 'xlsx',
+    });
+    if (dir) {
+      const folder = new TFolder();
+      folder.path = dir;
+      (file as unknown as { parent: TFolder }).parent = folder;
+    }
+    return file;
+  }
+
   it('routes a .png to the conversion path when backend === "mineru"', async () => {
     mockedConvert.mockResolvedValueOnce({
       markdown: '# Diagram\n\nbody',
@@ -696,9 +710,16 @@ describe('WikiEngine.ingestSource — Altitude #1 multi-format routing (#404 fol
     expect(mockedConvert).toHaveBeenCalledTimes(1);
     const call = mockedConvert.mock.calls[0]?.[0] as { pdfFile?: { path?: string } };
     expect(call?.pdfFile?.path).toBe('sources/diagram.png');
+
+    // Office/image support: the converted markdown must reach the wiki, not
+    // just the converter. The re-entered ingest used to be rejected by the
+    // requirements gate, which compared the ORIGINAL extension against
+    // COMPATIBLE_SOURCE_EXTENSIONS — zero pages, conversion already paid for.
+    expect(wikiPagesWritten(h.writtenPaths).length).toBeGreaterThan(0);
+    expect(JSON.stringify(h.llmRequests)).toContain('Diagram');
   });
 
-  it('routes a .docx to the conversion path when backend === "mineru"', async () => {
+  it('converts a .docx through MinerU and ingests the converted markdown', async () => {
     mockedConvert.mockResolvedValueOnce({
       markdown: '# Report\n\nbody',
       metadata: { convertedAt: '2026-08-22T00:00:00Z', converter: 'mineru/vlm' },
@@ -716,6 +737,37 @@ describe('WikiEngine.ingestSource — Altitude #1 multi-format routing (#404 fol
     expect(mockedConvert).toHaveBeenCalledTimes(1);
     const call = mockedConvert.mock.calls[0]?.[0] as { pdfFile?: { path?: string } };
     expect(call?.pdfFile?.path).toBe('sources/report.docx');
+
+    // The converted body — not a vault.read of the binary — is what the
+    // pipeline analysed, and it produced wiki pages.
+    expect(JSON.stringify(h.llmRequests)).toContain('# Report');
+    expect(wikiPagesWritten(h.writtenPaths).length).toBeGreaterThan(0);
+  });
+
+  it('converts a .xlsx through MinerU and ingests the converted sheet', async () => {
+    // The user-facing case: an Excel workbook is a first-class source under
+    // the MinerU backend (its extension is in MINERU_CONVERSION_EXTENSIONS),
+    // so the requires gate must not reject it by its original extension.
+    mockedConvert.mockResolvedValueOnce({
+      markdown: '# Budget\n\n| item | cost |\n| --- | --- |\n| cpu | 100 |',
+      metadata: { convertedAt: '2026-08-22T00:00:00Z', converter: 'mineru/vlm' },
+    });
+    const h = createWikiEngineHarness({
+      settings: { markdownConversionBackend: 'mineru' },
+      llmResponses: [JSON.stringify({ source_title: 'B', summary: 's', entities: [], concepts: [] })],
+    });
+    Object.assign(h.engine['app'], {
+      secretStorage: { getSecret: vi.fn(() => 'secret-token') },
+    });
+
+    await h.engine.ingestSource(xlsxFile('sources/budget.xlsx'));
+
+    expect(mockedConvert).toHaveBeenCalledTimes(1);
+    const call = mockedConvert.mock.calls[0]?.[0] as { pdfFile?: { path?: string } };
+    expect(call?.pdfFile?.path).toBe('sources/budget.xlsx');
+
+    expect(JSON.stringify(h.llmRequests)).toContain('cpu');
+    expect(wikiPagesWritten(h.writtenPaths).length).toBeGreaterThan(0);
   });
 
   it('does NOT route a .png to conversion when backend === "native" (native is PDF-only)', async () => {

@@ -28,9 +28,11 @@ export const WIKI_SUBFOLDERS = {
 // ============================================================================
 
 /**
- * File extensions (lowercase, no dot) accepted by the ingestion gate (#164).
- * Text sources are read directly; PDF sources are transcribed through the
- * configured LLM provider's native document-input capability (v1.25.0 PR2).
+ * File extensions (lowercase, no dot) accepted by the ingestion gate for a
+ * source that is read directly (#164). This is the BASE set: text sources are
+ * read as-is and PDFs are transcribed by the configured LLM provider's native
+ * document-input capability (v1.25.0 PR2). Everything a conversion backend can
+ * turn into markdown is added on top by `allowedSourceExtensions` below.
  */
 export const COMPATIBLE_SOURCE_EXTENSIONS = ['md', 'markdown', 'txt', 'text', 'pdf'] as const;
 
@@ -40,12 +42,36 @@ export const COMPATIBLE_SOURCE_EXTENSIONS = ['md', 'markdown', 'txt', 'text', 'p
  * MinerU API (https://mineru.net/apiManage/docs), the Precise parser
  * accepts PDF + images (png/jpg/jpeg/jp2/webp/gif/bmp) + Office docs
  * (doc/docx/ppt/pptx/xls/xlsx). The native backend still only accepts
- * PDF — see `wiki-engine.ts:888` for the routing decision.
+ * PDF — see the conversion branch of `WikiEngine.ingestSource` for the
+ * routing decision.
  */
 export const MINERU_CONVERSION_EXTENSIONS = [
   'pdf', 'png', 'jpg', 'jpeg', 'jp2', 'webp', 'gif', 'bmp',
   'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx',
 ] as const;
+
+/** Text/PDF set + MinerU-convertible set, deduped (`pdf` is in both). */
+const MINERU_SOURCE_EXTENSIONS: readonly string[] = [
+  ...new Set<string>([...COMPATIBLE_SOURCE_EXTENSIONS, ...MINERU_CONVERSION_EXTENSIONS]),
+];
+
+/**
+ * Extensions an ingest source may have, given the configured conversion backend.
+ *
+ * One function, four call sites: the two file pickers, the folder picker and the
+ * engine's post-conversion requirements gate. They used to read
+ * `COMPATIBLE_SOURCE_EXTENSIONS` directly, which made the MinerU backend's
+ * Office/image support unreachable — the formats were hidden from the pickers,
+ * and a file that reached the engine another way was skipped as
+ * `incompatible-type` AFTER MinerU had already converted it. Routing
+ * (`MINERU_CONVERSION_EXTENSIONS`) only tells the engine what it can convert;
+ * this is what the user is allowed to hand it.
+ */
+export function allowedSourceExtensions(
+  backend: 'native' | 'mineru' | undefined,
+): readonly string[] {
+  return backend === 'mineru' ? MINERU_SOURCE_EXTENSIONS : COMPATIBLE_SOURCE_EXTENSIONS;
+}
 
 // ============================================================================
 // Lint & Performance Thresholds

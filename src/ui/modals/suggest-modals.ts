@@ -6,32 +6,38 @@
 // (src/core/folder-scope.ts); PR #384 / #383 follow-up centralised it.
 
 import { App, TFile, TFolder, FuzzySuggestModal } from 'obsidian';
-import { COMPATIBLE_SOURCE_EXTENSIONS } from '../../constants';
+import type { LLMWikiSettings } from '../../types';
+import { allowedSourceExtensions } from '../../constants';
 import { isExcludedFromSourcePicker } from '../../core/folder-scope';
-
-const isCompatibleSource = (f: TFile): boolean =>
-  (COMPATIBLE_SOURCE_EXTENSIONS as readonly string[]).includes(f.extension.toLowerCase());
 
 export class FileSuggestModal extends FuzzySuggestModal<TFile> {
   onSelect: (file: TFile) => void;
-  private wikiFolder: string;
+  private settings: LLMWikiSettings;
 
-  constructor(app: App, wikiFolder: string, onSelect: (file: TFile) => void) {
+  constructor(app: App, settings: LLMWikiSettings, onSelect: (file: TFile) => void) {
     super(app);
-    this.wikiFolder = wikiFolder;
+    this.settings = settings;
     this.onSelect = onSelect;
   }
 
   getItems(): TFile[] {
     // v1.25.0 PR2: include PDFs in the source picker (PDFs are a first-class
-    // source format). Filter by compatible extension + exclude wiki/config
-    // directories, mirroring the legacy markdown-only behavior. The exclusion
-    // rule (`isExcludedFromSourcePicker`) is shared with the folder picker so
-    // the wiki folder itself, its descendants, and configDir siblings of any
-    // shape are all hidden together.
+    // source format). Office/image sources join them whenever the MinerU
+    // backend is configured — the backend is what makes those formats
+    // ingestable, so the picker must ask the backend rather than a fixed list
+    // (`allowedSourceExtensions`, shared with the folder picker, the multi-file
+    // picker and the engine's requirements gate). The exclusion rule
+    // (`isExcludedFromSourcePicker`) is shared with the folder picker so the
+    // wiki folder itself, its descendants, and configDir siblings of any shape
+    // are all hidden together.
+    const allowed = allowedSourceExtensions(this.settings.markdownConversionBackend);
     return this.app.vault.getFiles()
-      .filter(f => isCompatibleSource(f))
-      .filter(f => !isExcludedFromSourcePicker(f.path, this.wikiFolder, this.app.vault.configDir));
+      .filter(f => allowed.includes(f.extension.toLowerCase()))
+      .filter(f => !isExcludedFromSourcePicker(
+        f.path,
+        this.settings.wikiFolder,
+        this.app.vault.configDir,
+      ));
   }
 
   getItemText(file: TFile): string {
