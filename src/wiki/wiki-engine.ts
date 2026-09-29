@@ -733,8 +733,8 @@ export class WikiEngine {
    *
    * Artifact policy: the cache (`.obsidian/plugins/karpathywiki/pdf-cache/`) is
    * always the source of truth. When the user opts in via `writePdfMarkdownToVault`,
-   * the converted markdown is also written to `<dir>/<basename>.pdf.md` next to
-   * the source PDF. Otherwise (default, cache-only) no sidecar is written — the
+   * the converted markdown is also written to `<dir>/<name>.md` next to
+   * the source (`paper.pdf.md`, `report.docx.md`). Otherwise (default, cache-only) no sidecar is written — the
    * vault contains no implementation artifacts from PDF ingestion.
    *
    * Errors are caught and surfaced via the standard `reportSkip` path so
@@ -883,7 +883,7 @@ export class WikiEngine {
 
     // v1.25.0 PR3: optional sidecar write. When the user opts in via
     // `writePdfMarkdownToVault`, persist the converted markdown next to the
-    // source PDF (`<dir>/<basename>.pdf.md`). Default off → cache-only; the
+    // source (`<dir>/<name>.md`, e.g. `paper.pdf.md`). Default off → cache-only; the
     // `.obsidian` cache remains the only artifact. The write happens before
     // re-entering the standard ingest path so the sidecar reflects the exact
     // markdown fed to the analysis pipeline.
@@ -903,7 +903,11 @@ export class WikiEngine {
     let sidecarPath = '';
     if (this.settings.writePdfMarkdownToVault === true) {
       const dir = file.parent?.path ?? '';
-      const rawPath = dir ? `${dir}/${file.basename}.pdf.md` : `${file.basename}.pdf.md`;
+      // Keyed on the full file name (`report.docx.md`), not `<basename>.pdf.md`:
+      // with MinerU converting Office/image sources, same-basename siblings
+      // (report.pdf / report.docx) would otherwise overwrite one sidecar.
+      // For PDFs this is the same `<basename>.pdf.md` path as before.
+      const rawPath = dir ? `${dir}/${file.name}.md` : `${file.name}.md`;
       sidecarPath = normalizePath(rawPath);
       // v1.25.11 PATCH #169: sidecar-write stage mirror. Fires only when
       // the user has opted in via writePdfMarkdownToVault. ADD-only
@@ -1003,8 +1007,11 @@ export class WikiEngine {
     // Guard: only dispatch to the conversion branch when the caller has
     // NOT already provided a converted body — otherwise this would recurse
     // forever (the conversion result is fed back as contentOverride and
-    // `ingestConversionSource` re-enters this method).
-    if (!opts?.contentOverride) {
+    // `ingestConversionSource` re-enters this method). Test for presence, not
+    // truthiness: a converter can legitimately return `''` (a textless image
+    // or blank scan), and `!''` would re-dispatch to the cached empty result
+    // forever instead of reaching the empty-content gate below.
+    if (opts?.contentOverride === undefined) {
       const ext = file.extension.toLowerCase();
       const needsMineruConversion = this.settings.markdownConversionBackend === 'mineru'
         && (MINERU_CONVERSION_EXTENSIONS as readonly string[]).includes(ext);

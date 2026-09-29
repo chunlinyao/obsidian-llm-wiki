@@ -770,6 +770,50 @@ describe('WikiEngine.ingestSource — Altitude #1 multi-format routing (#404 fol
     expect(wikiPagesWritten(h.writtenPaths).length).toBeGreaterThan(0);
   });
 
+  it('skips a textless image whose MinerU conversion is empty instead of re-converting forever', async () => {
+    // `''` is a supplied body, not a missing one. The re-entry guard used to
+    // test `!contentOverride`, so an empty conversion re-dispatched to the
+    // (cached) converter endlessly and never reached the empty-content gate.
+    mockedConvert.mockResolvedValue({
+      markdown: '',
+      metadata: { convertedAt: '2026-08-22T00:00:00Z', converter: 'mineru/vlm' },
+    });
+    const h = createWikiEngineHarness({
+      settings: { markdownConversionBackend: 'mineru' },
+    });
+    Object.assign(h.engine['app'], {
+      secretStorage: { getSecret: vi.fn(() => 'secret-token') },
+    });
+
+    await h.engine.ingestSource(pngFile('sources/diagram.png'));
+
+    expect(mockedConvert).toHaveBeenCalledTimes(1);
+    expect(h.reports.at(-1)?.skipped).toBe(true);
+    expect(wikiPagesWritten(h.writtenPaths)).toEqual([]);
+    expect(h.stats.llmCalls).toBe(0);
+  });
+
+  it('names the sidecar after the full file name so same-basename sources do not collide', async () => {
+    mockedConvert.mockResolvedValueOnce({
+      markdown: '# Report\n\nfrom docx',
+      metadata: { convertedAt: '2026-08-22T00:00:00Z', converter: 'mineru/vlm' },
+    });
+    const h = createWikiEngineHarness({
+      files: { 'sources/report.pdf.md': 'PDF SIDECAR' },
+      settings: { markdownConversionBackend: 'mineru', writePdfMarkdownToVault: true },
+      llmResponses: [JSON.stringify({ source_title: 'R', summary: 's', entities: [], concepts: [] })],
+    });
+    Object.assign(h.engine['app'], {
+      secretStorage: { getSecret: vi.fn(() => 'secret-token') },
+    });
+
+    await h.engine.ingestSource(docxFile('sources/report.docx'));
+
+    expect(h.files.get('sources/report.docx.md')).toBe('# Report\n\nfrom docx');
+    // The sibling PDF's sidecar is untouched.
+    expect(h.files.get('sources/report.pdf.md')).toBe('PDF SIDECAR');
+  });
+
   it('does NOT route a .png to conversion when backend === "native" (native is PDF-only)', async () => {
     // Native backend has no image input support. The .png should fall
     // through to the standard text-ingest path, which calls vault.read
