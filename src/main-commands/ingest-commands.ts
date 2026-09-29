@@ -26,7 +26,7 @@ import { getText } from '../core/i18n';
 import { slugify } from '../core/slug';
 import { pageBelongsToNote } from '../core/ingest-state';
 import { isIngestableSource } from '../core/folder-scope';
-import { COMPATIBLE_SOURCE_EXTENSIONS, NOTICE_NORMAL, NOTICE_ERROR } from '../constants';
+import { allowedSourceExtensions, NOTICE_NORMAL, NOTICE_ERROR } from '../constants';
 import { FileSuggestModal, FolderSuggestModal, MultiFileSuggestModal, IngestReportModal } from '../ui/modals';
 import { ProgressScope } from '../core/progress-notification';
 
@@ -88,7 +88,7 @@ export const ingestCommands = {
       return;
     }
 
-    new FileSuggestModal(this.app, this.settings.wikiFolder, (file: TFile) => {
+    new FileSuggestModal(this.app, this.settings, (file: TFile) => {
       // B2.5 follow-up (v1.26.3 PATCH): 'Ingesting: <file>' was hardcoded
       // English — route through getText so the Toast honors the locale.
       this.showProgressFor(ProgressScope.IngestManual,
@@ -133,7 +133,10 @@ export const ingestCommands = {
     }
 
     new FolderSuggestModal(this.app, this.settings.wikiFolder, (folder) => {
-      const allowedExts: readonly string[] = COMPATIBLE_SOURCE_EXTENSIONS;
+      // Office/image formats join the sweep under the MinerU backend — the same
+      // list the file pickers offer, so a folder is not silently narrower than
+      // the single-file picker (`allowedSourceExtensions`).
+      const allowedExts = allowedSourceExtensions(this.settings.markdownConversionBackend);
       // v1.25.10 PATCH Issue #364 (consolidated with DocTpoint PR #370):
       // scope on the folder boundary, not on a bare string prefix. The
       // helper enforces a path-separator boundary and treats the vault

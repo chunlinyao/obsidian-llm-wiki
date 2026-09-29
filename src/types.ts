@@ -287,6 +287,9 @@ export interface LLMWikiSettings {
    *  `pdfConversionBackend` in v1.27.0 MINOR to reflect the broader scope
    *  (Anthropic Vision + OpenAI Vision support images natively). */
   markdownConversionBackend?: 'native' | 'mineru';
+  /** Optional MinerU v1 service root (for example http://192.168.1.100:8000).
+   *  Blank preserves the existing mineru.net Cloud v4 integration. */
+  mineruApiUrl?: string;
   wikiFolder: string;
   /** UI language — the locale the settings panel and modals render in. Keyed
    *  off the TEXTS barrel (11 locales) so adding a locale updates this type. */
@@ -1538,6 +1541,7 @@ export const DEFAULT_SETTINGS: LLMWikiSettings = {
   baseUrl: '',
   model: '',  // No hardcoded default — user must fetch models or enter manually
   markdownConversionBackend: 'native',
+  mineruApiUrl: '',
   wikiFolder: 'wiki',
   language: 'en',
   wikiLanguage: 'en',

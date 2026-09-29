@@ -21,7 +21,7 @@ import type { LLMWikiSettings } from '../../types';
 import { getText } from '../../core/i18n';
 import { buildFolderTree, type TreeNode } from '../../core/build-folder-tree';
 import type { IngestQueue } from '../../core/ingest-queue';
-import { COMPATIBLE_SOURCE_EXTENSIONS } from '../../constants';
+import { allowedSourceExtensions } from '../../constants';
 import { isExcludedFromSourcePicker } from '../../core/folder-scope';
 import { slugify } from '../../core/slug';
 import { pageBelongsToNote, noteHasDrifted, type IngestDiskState } from '../../core/ingest-state';
@@ -122,12 +122,14 @@ export class MultiFileSuggestModal extends Modal {
     contentEl.addClass('llm-wiki-multi-file-modal');
     modalEl.addClass('llm-wiki-multi-file-modal');
 
-    // Build the candidate list (non-wiki, non-configDir, compatible extensions)
+    // Build the candidate list (non-wiki, non-configDir, ingestable extensions)
     // and the nested folder tree ONCE. The tree is then rendered once and
     // updated in place — re-rendering on every queue change would
     // close every <details> and force the user to re-expand
-    // folders (the bug v2 fixes). v1.25.0 PR2: include PDFs.
-    const compatibleExts: readonly string[] = COMPATIBLE_SOURCE_EXTENSIONS;
+    // folders (the bug v2 fixes). v1.25.0 PR2: include PDFs. Office/image
+    // formats are included whenever the MinerU backend is configured — the
+    // same list the single-file picker and the engine gate use.
+    const compatibleExts = allowedSourceExtensions(this.settings.markdownConversionBackend);
     const available = this.app.vault.getFiles()
       .filter(f => !isExcludedFromSourcePicker(f.path, this.wikiFolder, this.app.vault.configDir))
       .filter(f => compatibleExts.includes(f.extension.toLowerCase()))

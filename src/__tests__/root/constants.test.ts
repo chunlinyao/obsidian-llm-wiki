@@ -21,6 +21,9 @@ import {
   LEX_MATCH_MIN_TOP_SCORE,
   LEX_FALLBACK_TOP_K,
   QUERY_SEED_LLM_MAX_CANDIDATES,
+  COMPATIBLE_SOURCE_EXTENSIONS,
+  MINERU_CONVERSION_EXTENSIONS,
+  allowedSourceExtensions,
 } from '../../constants';
 
 /**
@@ -172,5 +175,45 @@ describe('source-analyzer shadow constant removed (Issue #75)', () => {
   // the ModuleWatcher in source-analyzer.ts integration tests.
   it('MAX_TOKENS_BATCH is 16000 (the value that replaced the shadow)', () => {
     expect(MAX_TOKENS_BATCH).toBe(16000);
+  });
+});
+
+/**
+ * Office/image source support: the pickers and the post-conversion gate must
+ * read the SAME allowlist the engine routes on.
+ *
+ * Before `allowedSourceExtensions` existed, three call sites (the two file
+ * pickers and the folder picker) plus the engine's requirements gate all read
+ * `COMPATIBLE_SOURCE_EXTENSIONS` (md/markdown/txt/text/pdf) unconditionally,
+ * while the MinerU branch routed doc/docx/ppt/pptx/xls/xlsx and eight image
+ * formats. Two symptoms followed: an .xlsx could not be selected in
+ * "Ingest single source", and one that reached the engine anyway was skipped
+ * as `incompatible-type` AFTER MinerU had already converted it.
+ */
+describe('Source-extension allowlist by conversion backend (Office support)', () => {
+  it('native backend keeps the text + PDF set', () => {
+    expect(allowedSourceExtensions('native')).toEqual([...COMPATIBLE_SOURCE_EXTENSIONS]);
+  });
+
+  it('an unset backend behaves as native (the optional field default)', () => {
+    expect(allowedSourceExtensions(undefined)).toEqual([...COMPATIBLE_SOURCE_EXTENSIONS]);
+  });
+
+  it('mineru backend adds every extension the converter routes', () => {
+    const allowed = allowedSourceExtensions('mineru');
+    for (const ext of MINERU_CONVERSION_EXTENSIONS) expect(allowed).toContain(ext);
+    for (const ext of COMPATIBLE_SOURCE_EXTENSIONS) expect(allowed).toContain(ext);
+  });
+
+  it('Office and image formats are offered only under the MinerU backend', () => {
+    for (const ext of ['doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'png', 'jpg', 'jpeg', 'webp']) {
+      expect(allowedSourceExtensions('mineru')).toContain(ext);
+      expect(allowedSourceExtensions('native')).not.toContain(ext);
+    }
+  });
+
+  it('carries no duplicate entry (pdf is in both source lists)', () => {
+    const allowed = allowedSourceExtensions('mineru');
+    expect(new Set(allowed).size).toBe(allowed.length);
   });
 });

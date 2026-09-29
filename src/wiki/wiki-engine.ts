@@ -72,7 +72,7 @@ import { ContradictionManager } from './contradictions';
 // v1.25.1 Phase C-PR1: buildLogHeader moved into LogWriter.
 import { UNIVERSAL_LINK_CONSTRAINTS } from './prompts/constraints';
 import { SourceAnalyzer } from './source-analyzer';
-import { TOKENS_PAGE_GENERATION, NOTICE_ABORT, NOTICE_RATE_LIMIT, NOTICE_NORMAL, NOTICE_SHORT, INGESTED_HASHES_TTL_MS, COMPATIBLE_SOURCE_EXTENSIONS, MINERU_API_TOKEN_SECRET_ID, MINERU_CONVERSION_EXTENSIONS, MINERU_MAX_PDF_MB, MINERU_MAX_PDF_PAGES } from '../constants';
+import { TOKENS_PAGE_GENERATION, NOTICE_ABORT, NOTICE_RATE_LIMIT, NOTICE_NORMAL, NOTICE_SHORT, INGESTED_HASHES_TTL_MS, COMPATIBLE_SOURCE_EXTENSIONS, MINERU_API_TOKEN_SECRET_ID, MINERU_CONVERSION_EXTENSIONS, MINERU_MAX_PDF_MB, MINERU_MAX_PDF_PAGES, allowedSourceExtensions } from '../constants';
 import { PageFactory } from './page-factory';
 import { ConversationIngestor, ConversationOrchestration, formatConversation, ConversationHistory } from './conversation-ingest';
 import type { Graph } from '../core/build-graph';
@@ -575,12 +575,21 @@ export class WikiEngine {
    * duplicates (within the batch and already in the wiki). Returns the first
    * failing reason, or null to proceed. On proceed, records the hash in the batch
    * so a later identical file in the same run is caught.
+   *
+   * `allowedExtensions` defaults to the text/PDF set. The conversion re-entry
+   * passes the configured backend's set: its body is already converted markdown,
+   * so the ORIGINAL extension (docx / xlsx / png …) must not decide the outcome.
    */
-  async checkRequirements(file: TFile, content: string, batch?: BatchRequirementsContext): Promise<SourceRejection | null> {
+  async checkRequirements(
+    file: TFile,
+    content: string,
+    batch?: BatchRequirementsContext,
+    allowedExtensions: readonly string[] = COMPATIBLE_SOURCE_EXTENSIONS,
+  ): Promise<SourceRejection | null> {
     const contentRejection = checkContentRequirements({
       extension: file.extension,
       content,
-      allowedExtensions: COMPATIBLE_SOURCE_EXTENSIONS,
+      allowedExtensions,
     });
     if (contentRejection) return contentRejection;
 
@@ -724,8 +733,8 @@ export class WikiEngine {
    *
    * Artifact policy: the cache (`.obsidian/plugins/karpathywiki/pdf-cache/`) is
    * always the source of truth. When the user opts in via `writePdfMarkdownToVault`,
-   * the converted markdown is also written to `<dir>/<basename>.pdf.md` next to
-   * the source PDF. Otherwise (default, cache-only) no sidecar is written — the
+   * the converted markdown is also written to `<dir>/<name>.md` next to
+   * the source (`paper.pdf.md`, `report.docx.md`). Otherwise (default, cache-only) no sidecar is written — the
    * vault contains no implementation artifacts from PDF ingestion.
    *
    * Errors are caught and surfaced via the standard `reportSkip` path so
@@ -784,6 +793,7 @@ export class WikiEngine {
           model: this.settings.model,
           forcePdfSupport: this.settings.forcePdfSupport,
           markdownConversionBackend: this.settings.markdownConversionBackend,
+          mineruApiUrl: this.settings.mineruApiUrl,
         },
         ...(this.settings.markdownConversionBackend === 'mineru'
           ? { mineruApiToken: this.app.secretStorage.getSecret(MINERU_API_TOKEN_SECRET_ID) ?? '' }
@@ -873,7 +883,7 @@ export class WikiEngine {
 
     // v1.25.0 PR3: optional sidecar write. When the user opts in via
     // `writePdfMarkdownToVault`, persist the converted markdown next to the
-    // source PDF (`<dir>/<basename>.pdf.md`). Default off → cache-only; the
+    // source (`<dir>/<name>.md`, e.g. `paper.pdf.md`). Default off → cache-only; the
     // `.obsidian` cache remains the only artifact. The write happens before
     // re-entering the standard ingest path so the sidecar reflects the exact
     // markdown fed to the analysis pipeline.
@@ -893,7 +903,11 @@ export class WikiEngine {
     let sidecarPath = '';
     if (this.settings.writePdfMarkdownToVault === true) {
       const dir = file.parent?.path ?? '';
-      const rawPath = dir ? `${dir}/${file.basename}.pdf.md` : `${file.basename}.pdf.md`;
+      // Keyed on the full file name (`report.docx.md`), not `<basename>.pdf.md`:
+      // with MinerU converting Office/image sources, same-basename siblings
+      // (report.pdf / report.docx) would otherwise overwrite one sidecar.
+      // For PDFs this is the same `<basename>.pdf.md` path as before.
+      const rawPath = dir ? `${dir}/${file.name}.md` : `${file.name}.md`;
       sidecarPath = normalizePath(rawPath);
       // v1.25.11 PATCH #169: sidecar-write stage mirror. Fires only when
       // the user has opted in via writePdfMarkdownToVault. ADD-only
@@ -993,8 +1007,11 @@ export class WikiEngine {
     // Guard: only dispatch to the conversion branch when the caller has
     // NOT already provided a converted body — otherwise this would recurse
     // forever (the conversion result is fed back as contentOverride and
-    // `ingestConversionSource` re-enters this method).
-    if (!opts?.contentOverride) {
+    // `ingestConversionSource` re-enters this method). Test for presence, not
+    // truthiness: a converter can legitimately return `''` (a textless image
+    // or blank scan), and `!''` would re-dispatch to the cached empty result
+    // forever instead of reaching the empty-content gate below.
+    if (opts?.contentOverride === undefined) {
       const ext = file.extension.toLowerCase();
       const needsMineruConversion = this.settings.markdownConversionBackend === 'mineru'
         && (MINERU_CONVERSION_EXTENSIONS as readonly string[]).includes(ext);
@@ -1025,7 +1042,19 @@ export class WikiEngine {
     // PDF branch needs them. A skip here therefore has something to tear down,
     // and the return below sits above the main `try`, so it must do it itself.
     const fileContent = opts?.contentOverride ?? await this.app.vault.read(file);
-    const rejection = opts?.forceReingest ? null : await this.checkRequirements(file, fileContent, opts?.batchCtx);
+    const rejection = opts?.forceReingest ? null : await this.checkRequirements(
+      file,
+      fileContent,
+      opts?.batchCtx,
+      // Office/image support (#Office): `contentOverride` is set only by the
+      // conversion re-entry, so this is the "body came from a converter" case.
+      // The converter is what makes docx/xlsx/png ingestable — without the
+      // widened allowlist the gate rejected the file by its ORIGINAL extension
+      // after MinerU had already converted it, producing zero pages.
+      opts?.contentOverride !== undefined
+        ? allowedSourceExtensions(this.settings.markdownConversionBackend)
+        : COMPATIBLE_SOURCE_EXTENSIONS,
+    );
     if (rejection) {
       const confirmed = rejection.reason === 'duplicate' && opts?.interactive && this.onConfirmReingest
         ? await this.onConfirmReingest(file, rejection)
